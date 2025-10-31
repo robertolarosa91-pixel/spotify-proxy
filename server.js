@@ -97,3 +97,47 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log("Server Spotify su porta " + PORT);
 });
+
+
+// ... sopra rimane uguale
+
+// login solo lettura (sorgente)
+app.get("/login-source", (req, res) => {
+  const scope = "playlist-read-private playlist-read-collaborative user-library-read";
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope,
+    state: "source"
+  });
+  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
+});
+
+// login per scrivere (destinazione)
+app.get("/login-target", (req, res) => {
+  const scope = "playlist-modify-public playlist-modify-private";
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope,
+    state: "target"
+  });
+  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
+});
+
+// nella tua /callback, quando ricevi il token:
+app.get("/callback", async (req, res) => {
+  // ... tuo codice di prima
+  // alla fine:
+  // capisco se è source o target
+  const state = req.query.state || "";
+  // data = token
+  res.send(`
+    <h2>Token ricevuto per: ${state || "sconosciuto"} ✅</h2>
+    <p>Copia questo token e salvalo (${state})</p>
+    <pre>${JSON.stringify(data, null, 2)}</pre>
+    <p><a href="/">Torna alla home</a></p>
+  `);
+});
