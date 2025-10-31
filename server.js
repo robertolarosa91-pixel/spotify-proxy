@@ -15,7 +15,7 @@ const REDIRECT_URI = "https://spotify-proxy-it65.onrender.com/callback";
 // memoria RAM per i token temporanei
 // struttura: { tokenId: { kind: "source"|"target", data: {...}, created: 1730360000000 } }
 const TEMP_TOKENS = {};
-// dopo quanto tempo buttiamo i token temporanei (30 min)
+// TTL token temporanei (30 min)
 const TEMP_TTL_MS = 30 * 60 * 1000;
 
 /* --------------------------------------------------
@@ -45,13 +45,15 @@ app.get("/", (req, res) => {
 -------------------------------------------------- */
 app.get("/wake", (req, res) => {
   cleanupTemp();
-  res.json({ ok: true, ts: Date.now(), tokens_cached: Object.keys(TEMP_TOKENS).length });
+  res.json({
+    ok: true,
+    ts: Date.now(),
+    tokens_cached: Object.keys(TEMP_TOKENS).length,
+  });
 });
 
 /* --------------------------------------------------
    1) AVVIO LOGIN SORGENTE
-   esempio:
-   https://spotify-proxy-it65.onrender.com/auth/source?return=https://worldhostingfree.altervista.org/
 -------------------------------------------------- */
 app.get("/auth/source", (req, res) => {
   const returnUrl =
@@ -71,7 +73,7 @@ app.get("/auth/source", (req, res) => {
     redirect_uri: REDIRECT_URI,
     scope,
     state,
-    // 👇 forza Spotify a mostrarti di nuovo la schermata
+    // forza Spotify a mostrarti di nuovo la schermata
     show_dialog: "true",
   });
 
@@ -98,7 +100,6 @@ app.get("/auth/target", (req, res) => {
     redirect_uri: REDIRECT_URI,
     scope,
     state,
-    // 👇 anche qui obblighiamo Spotify a chiedere il consenso
     show_dialog: "true",
   });
 
@@ -120,7 +121,6 @@ app.get("/callback", async (req, res) => {
   try {
     parsedState = JSON.parse(stateRaw);
   } catch (e) {
-    // fallback
     parsedState = {
       kind: "unknown",
       returnUrl: "https://worldhostingfree.altervista.org/",
@@ -169,7 +169,6 @@ app.get("/callback", async (req, res) => {
     url.searchParams.set("token_id", tokenId);
     url.searchParams.set("kind", parsedState.kind);
 
-    // rimando su Altervista
     res.redirect(url.toString());
   } catch (err) {
     console.error(err);
@@ -188,13 +187,6 @@ app.get("/token/:id", (req, res) => {
   if (!entry) {
     return res.status(404).json({ error: "not_found" });
   }
-
-  // se vuoi che sia "usa e butta", decommenta queste 3 righe:
-  // const out = entry;
-  // delete TEMP_TOKENS[id];
-  // return res.json(out);
-
-  // per ora lo lasciamo in RAM
   return res.json(entry);
 });
 
@@ -202,7 +194,7 @@ app.get("/token/:id", (req, res) => {
    5) ENDPOINT TECNICI
 -------------------------------------------------- */
 
-// 5a) leggi playlist dal sorgente
+/* 5a) leggi playlist dal sorgente (versione ROBUSTA) */
 app.post("/playlists-source", async (req, res) => {
   const { access_token } = req.body || {};
   if (!access_token)
@@ -212,10 +204,29 @@ app.post("/playlists-source", async (req, res) => {
     const resp = await fetch(
       "https://api.spotify.com/v1/me/playlists?limit=50",
       {
-        headers: { Authorization: "Bearer " + access_token },
+        headers: {
+          Authorization: "Bearer " + access_token,
+          Accept: "application/json",
+        },
       }
     );
-    const data = await resp.json();
+
+    // Spotify a volte risponde HTML se lo scope non va bene → leggiamo come testo
+    const text = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      // NON era JSON → chiarisco l’errore
+      return res.status(resp.status).json({
+        error: "spotify_not_json",
+        status: resp.status,
+        detail: text.substring(0, 400),
+        hint:
+          "Probabile login con account senza permessi di lettura. Rifai il login come SORGENTE.",
+      });
+    }
+
     return res.status(resp.status).json(data);
   } catch (err) {
     return res
@@ -224,7 +235,7 @@ app.post("/playlists-source", async (req, res) => {
   }
 });
 
-// 5b) clona UNA playlist
+/* 5b) clona UNA playlist */
 app.post("/clone-playlist", async (req, res) => {
   const { source_token, target_token, playlist_id } = req.body || {};
   if (!source_token || !target_token || !playlist_id) {
