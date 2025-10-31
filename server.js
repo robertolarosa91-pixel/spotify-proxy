@@ -97,7 +97,7 @@ app.get("/callback", async (req, res) => {
         Authorization: `Basic ${basic}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-        body: body.toString(),
+      body: body.toString(),
     });
 
     const data = await resp.json();
@@ -124,7 +124,7 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-// 6) (facoltativo) endpoint per leggere le playlist del SOURCE
+// 6) Leggi playlist dal SOURCE
 app.post("/playlists-source", async (req, res) => {
   const { access_token } = req.body || {};
   if (!access_token) {
@@ -147,6 +147,126 @@ app.post("/playlists-source", async (req, res) => {
   }
 });
 
+// 7) Clona UNA playlist
+app.post("/clone-playlist", async (req, res) => {
+  const { source_token, target_token, playlist_id } = req.body || {};
+  if (!source_token || !target_token || !playlist_id) {
+    return res.status(400).json({ error: "missing_params" });
+  }
+
+  try {
+    // 1. prendo i dati della playlist sorgente
+    const plResp = await fetch(
+      `https://api.spotify.com/v1/playlists/${playlist_id}`,
+      {
+        headers: { Authorization: "Bearer " + source_token },
+      }
+    );
+    const playlistData = await plResp.json();
+    if (!plResp.ok) {
+      return res.status(plResp.status).json({
+        error: "cant_read_source_playlist",
+        detail: playlistData,
+      });
+    }
+
+    // 2. prendo l'utente target (per sapere il suo id)
+    const meResp = await fetch("https://api.spotify.com/v1/me", {
+      headers: { Authorization: "Bearer " + target_token },
+    });
+    const meData = await meResp.json();
+    if (!meResp.ok) {
+      return res
+        .status(meResp.status)
+        .json({ error: "cant_read_target_user", detail: meData });
+    }
+
+    const targetUserId = meData.id;
+
+    // 3. creo la playlist sul target
+    const createResp = await fetch(
+      `https://api.spotify.com/v1/users/${targetUserId}/playlists`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + target_token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: playlistData.name + " (cloned)",
+          description:
+            playlistData.description || "Cloned from another account",
+          public: playlistData.public,
+        }),
+      }
+    );
+    const created = await createResp.json();
+    if (!createResp.ok) {
+      return res.status(createResp.status).json({
+        error: "cant_create_target_playlist",
+        detail: created,
+      });
+    }
+
+    const newPlaylistId = created.id;
+
+    // 4. prendo le tracce della playlist sorgente (prima pagina)
+    const tracksResp = await fetch(
+      `https://api.spotify.com/v1/playlists/${playlist_id}/tracks?limit=100`,
+      {
+        headers: { Authorization: "Bearer " + source_token },
+      }
+    );
+    const tracksData = await tracksResp.json();
+    if (!tracksResp.ok) {
+      return res.status(tracksResp.status).json({
+        error: "cant_read_tracks",
+        detail: tracksData,
+      });
+    }
+
+    // 5. preparo gli URI delle tracce
+    const uris = (tracksData.items || [])
+      .map((item) => item.track && item.track.uri)
+      .filter(Boolean);
+
+    // 6. aggiungo le tracce alla nuova playlist (se ci sono)
+    if (uris.length > 0) {
+      const addResp = await fetch(
+        `https://api.spotify.com/v1/playlists/${newPlaylistId}/tracks`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + target_token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            uris: uris,
+          }),
+        }
+      );
+      const addData = await addResp.json();
+      if (!addResp.ok) {
+        return res
+          .status(addResp.status)
+          .json({ error: "cant_add_tracks", detail: addData });
+      }
+    }
+
+    // OK
+    return res.json({
+      ok: true,
+      source_playlist: playlist_id,
+      cloned_to: newPlaylistId,
+      cloned_name: playlistData.name,
+      tracks_copied: uris.length,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "clone_error", detail: err.message });
+  }
+});
+
+// AVVIO
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log("Server Spotify su porta " + PORT);
