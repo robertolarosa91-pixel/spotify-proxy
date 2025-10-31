@@ -23,10 +23,12 @@ app.use((req, res, next) => {
 // 1) home
 app.get("/", (req, res) => {
   res.send(`
-    <h1>Spotify Cloner (Render)</h1>
-    <p><a href="/login-source">1️⃣ Login account SORGENTE (leggi playlist)</a></p>
-    <p><a href="/login-target">2️⃣ Login account DESTINAZIONE (crea playlist)</a></p>
-    <p><a href="/login">🧪 Login completo (test)</a></p>
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  ...
+</html>
   `);
 });
 
