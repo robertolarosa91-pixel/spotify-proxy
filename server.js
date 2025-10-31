@@ -1,104 +1,99 @@
-import express from "express";
-import fetch from "node-fetch";
+const express = require("express");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.json());
 
+// 🔑 tue credenziali
 const CLIENT_ID = "1aded29c62d8436fa99caa3da89a1a4b";
 const CLIENT_SECRET = "f3ffc2141ed343dfa2ff2297a8807c38";
 
-// questo DEVE essere uguale a quello messo su Spotify Developer
+// questo è quello che hai messo su Spotify Developer
 const REDIRECT_URI = "https://spotify-proxy-it65.onrender.com/callback";
 
-app.get("/", (req, res) => {
-  res.json({ ok: true, service: "spotify-token-proxy" });
+// CORS (comodo)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
 });
 
-// 1) endpoint dove Spotify ti rimanda col code
+// 1) test
+app.get("/", (req, res) => {
+  res.send(`
+    <h1>Spotify Cloner (Render)</h1>
+    <p><a href="/login">🔓 Fai login con Spotify</a></p>
+  `);
+});
+
+// 2) /login → manda a Spotify
+app.get("/login", (req, res) => {
+  const state = "from-render";
+  const scope =
+    "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-read-email";
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope,
+    state,
+  });
+
+  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
+});
+
+// 3) /callback → Spotify torna qui
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
   const state = req.query.state;
 
   if (!code) {
-    return res.status(400).json({ error: "missing_code" });
+    return res.status(400).send("Manca il code da Spotify");
   }
 
   try {
-    // scambio code -> token
     const body = new URLSearchParams();
     body.append("grant_type", "authorization_code");
     body.append("code", code);
     body.append("redirect_uri", REDIRECT_URI);
 
+    // auth basic
     const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
 
     const resp = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
-        "Authorization": `Basic ${basic}`,
-        "Content-Type": "application/x-www-form-urlencoded"
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
-      body
+      body: body.toString(),
     });
 
     const data = await resp.json();
 
-    // se vuoi vederlo grezzo:
-    // return res.json(data);
+    if (!resp.ok) {
+      return res.status(resp.status).send(
+        `<h3>Errore da Spotify</h3><pre>${JSON.stringify(data, null, 2)}</pre>`
+      );
+    }
 
-    // se vuoi rimandarlo ad Altervista con una GET (facoltativo):
-    // const url = new URL("https://worldhostingfree.altervista.org/clone.php");
-    // url.searchParams.set("access_token", data.access_token || "");
-    // url.searchParams.set("refresh_token", data.refresh_token || "");
-    // return res.redirect(url.toString());
-
-    // per ora mostriamo tutto
-    return res.send(`
-      <h1>Token ricevuto da Spotify</h1>
+    // se vuoi vederlo
+    res.send(`
+      <h2>Token ricevuto ✅</h2>
+      <p>State: ${state}</p>
       <pre>${JSON.stringify(data, null, 2)}</pre>
+      <p><a href="/">Torna alla home</a></p>
     `);
-
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "token_exchange_failed", detail: err.message });
-  }
-});
-
-// 2) endpoint POST /token (se un domani vuoi continuare a usarlo da Altervista)
-app.post("/token", async (req, res) => {
-  const { code, redirect_uri } = req.body || {};
-
-  if (!code) {
-    return res.status(400).json({ error: "missing_code" });
-  }
-
-  try {
-    const body = new URLSearchParams();
-    body.append("grant_type", "authorization_code");
-    body.append("code", code);
-    body.append("redirect_uri", redirect_uri || REDIRECT_URI);
-
-    const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
-
-    const resp = await fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: {
-        "Authorization": `Basic ${basic}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body
-    });
-
-    const data = await resp.json();
-    return res.json(data);
-
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "token_exchange_failed", detail: err.message });
+    res.status(500).send(`<pre>${err.message}</pre>`);
   }
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log("Server listening on " + PORT);
+  console.log("Server Spotify su porta " + PORT);
 });
