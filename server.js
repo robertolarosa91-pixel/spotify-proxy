@@ -6,8 +6,8 @@ const app = express();
 app.use(express.json());
 
 // 🔑 CREDENZIALI SPOTIFY (corrispondono alla tua app)
-const CLIENT_ID = "1aded29c62d8436fa99caa3da89a1a4b";
-const CLIENT_SECRET = "f3ffc2141ed343dfa2ff2297a8807c38";
+const CLIENT_ID = "8fa43ce521c94b4b86cb966080d4a76f";
+const CLIENT_SECRET = "70f668ce60324c94b4808f0df1e2ad95";
 
 // 🔁 Redirect identico a quello registrato su Spotify Dashboard
 const REDIRECT_URI = "https://spotify-proxy-it65.onrender.com/callback";
