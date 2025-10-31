@@ -20,35 +20,61 @@ app.use((req, res, next) => {
   next();
 });
 
-// 1) test
+// 1) home
 app.get("/", (req, res) => {
   res.send(`
     <h1>Spotify Cloner (Render)</h1>
-    <p><a href="/login">🔓 Fai login con Spotify</a></p>
+    <p><a href="/login-source">1️⃣ Login account SORGENTE (leggi playlist)</a></p>
+    <p><a href="/login-target">2️⃣ Login account DESTINAZIONE (crea playlist)</a></p>
+    <p><a href="/login">🧪 Login completo (test)</a></p>
   `);
 });
 
-// 2) /login → manda a Spotify
+// 2) login “generico” (tutto)
 app.get("/login", (req, res) => {
-  const state = "from-render";
-  const scope =
-    "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-read-email";
-
   const params = new URLSearchParams({
     response_type: "code",
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
-    scope,
-    state,
+    scope:
+      "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-read-email",
+    state: "generic",
   });
 
   res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
 });
 
-// 3) /callback → Spotify torna qui
+// 3) login solo lettura (sorgente)
+app.get("/login-source", (req, res) => {
+  const scope =
+    "playlist-read-private playlist-read-collaborative user-library-read";
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope,
+    state: "source",
+  });
+  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
+});
+
+// 4) login per scrivere (destinazione)
+app.get("/login-target", (req, res) => {
+  const scope = "playlist-modify-public playlist-modify-private";
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope,
+    state: "target",
+  });
+  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
+});
+
+// 5) callback (UNICA)
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
-  const state = req.query.state;
+  const state = req.query.state || "";
 
   if (!code) {
     return res.status(400).send("Manca il code da Spotify");
@@ -61,7 +87,9 @@ app.get("/callback", async (req, res) => {
     body.append("redirect_uri", REDIRECT_URI);
 
     // auth basic
-    const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+    const basic = Buffer.from(
+      `${CLIENT_ID}:${CLIENT_SECRET}`
+    ).toString("base64");
 
     const resp = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -69,23 +97,26 @@ app.get("/callback", async (req, res) => {
         Authorization: `Basic ${basic}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: body.toString(),
+        body: body.toString(),
     });
 
     const data = await resp.json();
 
     if (!resp.ok) {
-      return res.status(resp.status).send(
-        `<h3>Errore da Spotify</h3><pre>${JSON.stringify(data, null, 2)}</pre>`
-      );
+      return res
+        .status(resp.status)
+        .send(
+          `<h3>Errore da Spotify</h3><pre>${JSON.stringify(data, null, 2)}</pre>`
+        );
     }
 
-    // se vuoi vederlo
+    // mostro di che token si tratta
     res.send(`
-      <h2>Token ricevuto ✅</h2>
-      <p>State: ${state}</p>
+      <h2>Token ricevuto per: <u>${state || "sconosciuto"}</u> ✅</h2>
+      <p>Copia questo token e salvalo come <b>${state ||
+        "generic"}</b> nel tuo sito.</p>
       <pre>${JSON.stringify(data, null, 2)}</pre>
-      <p><a href="/">Torna alla home</a></p>
+      <p><a href="/">⬅️ Torna alla home</a></p>
     `);
   } catch (err) {
     console.error(err);
@@ -93,51 +124,30 @@ app.get("/callback", async (req, res) => {
   }
 });
 
+// 6) (facoltativo) endpoint per leggere le playlist del SOURCE
+app.post("/playlists-source", async (req, res) => {
+  const { access_token } = req.body || {};
+  if (!access_token) {
+    return res.status(400).json({ error: "missing_access_token" });
+  }
+
+  try {
+    const resp = await fetch(
+      "https://api.spotify.com/v1/me/playlists?limit=50",
+      {
+        headers: {
+          Authorization: "Bearer " + access_token,
+        },
+      }
+    );
+    const data = await resp.json();
+    return res.status(resp.status).json(data);
+  } catch (err) {
+    return res.status(500).json({ error: "fetch_error", detail: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log("Server Spotify su porta " + PORT);
-});
-
-
-// ... sopra rimane uguale
-
-// login solo lettura (sorgente)
-app.get("/login-source", (req, res) => {
-  const scope = "playlist-read-private playlist-read-collaborative user-library-read";
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope,
-    state: "source"
-  });
-  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
-});
-
-// login per scrivere (destinazione)
-app.get("/login-target", (req, res) => {
-  const scope = "playlist-modify-public playlist-modify-private";
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope,
-    state: "target"
-  });
-  res.redirect("https://accounts.spotify.com/authorize?" + params.toString());
-});
-
-// nella tua /callback, quando ricevi il token:
-app.get("/callback", async (req, res) => {
-  // ... tuo codice di prima
-  // alla fine:
-  // capisco se è source o target
-  const state = req.query.state || "";
-  // data = token
-  res.send(`
-    <h2>Token ricevuto per: ${state || "sconosciuto"} ✅</h2>
-    <p>Copia questo token e salvalo (${state})</p>
-    <pre>${JSON.stringify(data, null, 2)}</pre>
-    <p><a href="/">Torna alla home</a></p>
-  `);
 });
